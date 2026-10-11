@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Token Bucket Rate Limiter</title>
+<!--
+  Remake of prompts/parkerrex-701462.md:
+  "explain a token bucket rate limiter, canvas only, no libraries, every frame a pure function of time
+   so my renderer can screenshot it."
+  Reference (Skillry remake, Canvas · Physics): took the bucket-above-gate layout and the request lane.
+  Did not take its physics simulation (state would accumulate across frames) or its palette. Do not copy.
+  Zero dependencies. One rAF loop, 20s cycle. The arrival schedule is fixed and folded once at load, so
+  stateAt(t) is a pure lookup: nothing mutates per frame. ?t=<sec> freezes the clock for screenshots.
+-->
+<style>
+  html,body{margin:0;height:100%;background:#0b1220;overflow:hidden}
+  canvas{position:absolute;inset:0;margin:auto;max-width:100%;max-height:100%;aspect-ratio:16/9;display:block}
+</style>
+</head>
+<body>
+<canvas id="c" width="960" height="540"></canvas>
+<script>
+'use strict';
+const W=960,H=540,LOOP=20,CAP=10,RATE=2,V=240,GX=540,LANE=318;
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const q=new URLSearchParams(location.search);
+const FROZEN=q.has('t')||matchMedia('(prefers-reduced-motion: reduce)').matches;
+const T0=q.has('t')?+q.get('t'):6.5;
+const FONT='system-ui,-apple-system,Segoe UI,Helvetica,sans-serif';
+const C={bg:'#0b1220',ink:'#e8edf6',dim:'#7f8ca3',tok:'#f4b63f',ok:'#3fd07a',no:'#f0514f',req:'#9aa7bd',box:'#182238',line:'#2a3650'};
+
+// Fixed arrival schedule (seconds): steady / burst / quiet / overload / calm. No randomness anywhere.
+const ARR=[];
+for(let i=0;i<5;i++)ARR.push(0.8+i);
+for(let i=0;i<15;i++)ARR.push(6+i*.08);
+for(let i=0;i<25;i++)ARR.push(12.5+i*.2);
+ARR.push(18.2,19.2);
+const PHASES=[
+ [0,'1 · Steady','1 request/s is under the 2 tokens/s refill, so the bucket fills up.'],
+ [6,'2 · Burst','15 requests in 1.2 s. The saved tokens absorb most of it, then rejects begin.'],
+ [7.3,'3 · Quiet','No requests. The bucket refills at 2 tokens/s. Full means extra refill is wasted.'],
+ [12.5,'4 · Overload','5 requests/s beats the 2/s refill. Once empty, only 2/s get through.'],
+ [17.6,'5 · Calm','Traffic drops and the bucket recovers for the next burst.']];
+
+// Fold the schedule once: bucket state right after each arrival. INIT is tuned so t=20 wraps to t=0.
+const INIT=4;
+const EV=[];{let tok=INIT,tl=0,acc=0,rej=0;
+ for(const a of ARR){tok=Math.min(CAP,tok+RATE*(a-tl));tl=a;const ok=tok>=1;ok?(tok-=1,acc++):rej++;EV.push({a,ok,tok,acc,rej});}}
+function stateAt(t){let s={a:0,tok:INIT,acc:0,rej:0};for(const e of EV){if(e.a>t)break;s=e;}
+ return{tokens:Math.min(CAP,s.tok+RATE*(t-s.a)),acc:s.acc,rej:s.rej};}
+const GRAPH=[];for(let px=0;px<=880;px+=2)GRAPH.push(stateAt(px/880*LOOP).tokens);
+function phaseAt(t){let p=PHASES[0];for(const ph of PHASES)if(ph[0]<=t)p=ph;return p;}
+
+function rr(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r);}
+function txt(s,x,y,size,color,weight,align){ctx.font=(weight||400)+' '+size+'px '+FONT;ctx.fillStyle=color;ctx.textAlign=align||'left';ctx.textBaseline='middle';ctx.fillText(s,x,y);}
+function coin(x,y,r,a){ctx.globalAlpha=a;ctx.fillStyle=C.tok;ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fill();ctx.strokeStyle='#8a5e10';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(x,y,r*.55,0,7);ctx.stroke();ctx.globalAlpha=1;}
+
+function drawBucket(t,st){
+ const top=112,bot=262,wt=170,wb=130,surf=bot-st.tokens/CAP*(bot-top-8);
+ // tap + drops: one drop every 1/RATE s, position is the fractional phase of t*RATE
+ ctx.fillStyle=C.line;rr(GX-14,46,28,18,4);ctx.fill();rr(GX-6,60,12,14,2);ctx.fill();
+ txt('refill '+RATE+' tokens/s',GX+24,55,13,C.dim);
+ const full=st.tokens>=CAP-1e-6;
+ for(let k=0;k<2;k++){const ph=((t*RATE+k*.5)%1);const y=78+ph*(surf-78);
+  if(full){const x=GX+ph*ph*70,yy=78+Math.min(ph,.5)*(top-78)*2+Math.max(0,ph-.5)*ph*240;
+   ctx.globalAlpha=1-ph;ctx.fillStyle=C.dim;ctx.beginPath();ctx.arc(x,yy,4,0,7);ctx.fill();ctx.globalAlpha=1;}
+  else coin(GX,y,5,.9);}
+ if(full)txt('overflow discarded',GX+110,top-6,12,C.dim,400,'center');
+ // bucket outline
+ ctx.strokeStyle='#c7d1e4';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(GX-wt/2,top);ctx.lineTo(GX-wb/2,bot);ctx.lineTo(GX+wb/2,bot);ctx.lineTo(GX+wt/2,top);ctx.stroke();
+ ctx.fillStyle='rgba(255,255,255,.03)';ctx.beginPath();ctx.moveTo(GX-wt/2,top);ctx.lineTo(GX-wb/2,bot);ctx.lineTo(GX+wb/2,bot);ctx.lineTo(GX+wt/2,top);ctx.closePath();ctx.fill();
+ // tokens as a 4-column stack; the partial top coin fades in with the fractional token
+ const n=Math.floor(st.tokens+1e-6),frac=st.tokens-n;
+ for(let i=0;i<CAP;i++){const col=i%4,row=(i/4)|0;const x=GX-45+col*30,y=bot-16-row*26;
+  if(i<n)coin(x,y,11,1);else if(i===n&&frac>0)coin(x,y,11,frac*.9);
+  else{ctx.strokeStyle=C.line;ctx.lineWidth=1;ctx.setLineDash([3,3]);ctx.beginPath();ctx.arc(x,y,11,0,7);ctx.stroke();ctx.setLineDash([]);}}
+ txt(st.tokens.toFixed(1)+' / '+CAP+' tokens',GX+wb/2+14,bot-12,15,C.ink,600);
+}
+
+function drawLane(t,st){
+ ctx.strokeStyle=C.line;ctx.lineWidth=2;ctx.setLineDash([8,8]);ctx.beginPath();ctx.moveTo(0,LANE);ctx.lineTo(W,LANE);ctx.stroke();ctx.setLineDash([]);
+ txt('requests →',36,LANE-22,13,C.dim);txt('→ server',W-36,LANE-22,13,C.dim,400,'right');
+ // each request is positioned purely from (t - arrival); draw the neighbouring loops for a seamless wrap
+ for(const e of EV)for(let k=-1;k<=1;k++){const dt=t-(e.a+k*LOOP);if(dt<-3||dt>2.6)continue;
+  let x,y,col=C.req,a=1;
+  if(dt<0){x=GX+dt*V;y=LANE;}
+  else if(e.ok){x=GX+dt*V;y=LANE;col=C.ok;if(dt<.3)coin(GX,262+dt/.3*32,6,1-dt/.3);}
+  else{x=GX+dt*70;y=LANE+dt*dt*520;col=C.no;a=Math.max(0,1-dt/1.3);if(a<=0)continue;}
+  ctx.globalAlpha=a;ctx.fillStyle=col;rr(x-12,y-9,24,18,5);ctx.fill();
+  if(dt>=0&&e.ok)txt('✓',x,y+1,12,'#06240f',700,'center');
+  if(dt>=0&&!e.ok)txt('✕',x,y+1,12,'#3a0a0a',700,'center');
+  ctx.globalAlpha=1;}
+ // gate box on top, so requests visibly pass through it
+ ctx.fillStyle=C.box;rr(GX-46,LANE-24,92,48,10);ctx.fill();ctx.strokeStyle='#3a4a6a';ctx.lineWidth=1.5;ctx.stroke();
+ txt('limiter',GX,LANE,13,C.ink,600,'center');
+}
+
+function drawGraph(t){
+ const x0=40,y0=398,w=880,h=96;
+ ctx.fillStyle=C.box;rr(x0-10,y0-10,w+20,h+34,10);ctx.fill();
+ txt('tokens over time (t = '+t.toFixed(2)+' s of '+LOOP+' s loop)',x0,y0+2,12,C.dim);
+ ctx.strokeStyle=C.line;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x0,y0+14);ctx.lineTo(x0+w,y0+14);ctx.stroke();
+ ctx.strokeStyle=C.tok;ctx.lineWidth=2;ctx.beginPath();
+ GRAPH.forEach((v,i)=>{const x=x0+i*2,y=y0+14+(1-v/CAP)*(h-28);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
+ for(const e of EV){const x=x0+e.a/LOOP*w;ctx.fillStyle=e.ok?C.ok:C.no;ctx.fillRect(x-1,y0+h-10,2,e.a<=t?10:4);}
+ const px=x0+t/LOOP*w;ctx.strokeStyle=C.ink;ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(px,y0+12);ctx.lineTo(px,y0+h);ctx.stroke();
+ txt('cap',x0-4,y0+14,10,C.dim,400,'right');txt('0',x0-4,y0+h-14,10,C.dim,400,'right');
+}
+
+function frame(now){
+ const t=FROZEN?T0:((now/1000)%LOOP);
+ const st=stateAt(t),ph=phaseAt(t);
+ ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle=C.bg;ctx.fillRect(0,0,W,H);
+ txt('Token bucket rate limiter',36,38,24,C.ink,700);
+ txt(ph[1],36,70,15,C.tok,600);
+ txt(ph[2],36,92,13,C.dim);
+ txt('accepted '+st.acc,W-36,38,15,C.ok,600,'right');txt('rejected '+st.rej,W-36,62,15,C.no,600,'right');
+ drawBucket(t,st);drawLane(t,st);drawGraph(t);
+ if(!FROZEN)requestAnimationFrame(frame);
+}
+function size(){const r=innerWidth/innerHeight>16/9;cv.style.width=r?innerHeight*16/9+'px':'100vw';cv.style.height=r?'100vh':innerWidth*9/16+'px';}
+addEventListener('resize',()=>{size();if(FROZEN)frame(0)});size();requestAnimationFrame(frame);
+</script>
+</body>
+</html>
