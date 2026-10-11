@@ -38,7 +38,7 @@ function clamp01(v){return v<0?0:v>1?1:v}
 function ease(k){return k<.5?2*k*k:1-(-2*k+2)*(-2*k+2)/2}
 function fade(t,a,b,d=.6){return Math.min(clamp01((t-a)/d),clamp01((b-t)/d))}
 function stateAt(t){
- const u=clamp01((t-D0)/(D1-D0)),s=ARC[K]*(1-(1-u)*(1-u));let i=0;while(i<K-1&&ARC[i+1]<s)i++; // ease-out so the ball settles rather than stops dead
+ const u=clamp01((t-D0)/(D1-D0)),s=ARC[K]*u;let i=0;while(i<K-1&&ARC[i+1]<s)i++; // constant speed along the arc
  const a=PATH[i],b=PATH[i+1],e=ARC[i+1]>ARC[i]?clamp01((s-ARC[i])/(ARC[i+1]-ARC[i])):1;
  const x=a[0]+(b[0]-a[0])*e,y=a[1]+(b[1]-a[1])*e,g=grad(x,y),w=2*Math.PI*((t/LOOP)%1); // %1 so w is exactly 0 at both seam ends
  return {x,y,z:loss(x,y),gn:Math.hypot(g[0],g[1]),step:u>=1?K:i,trail:u>=1?K+1:i+1,
