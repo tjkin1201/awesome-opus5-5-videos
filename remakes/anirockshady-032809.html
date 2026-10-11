@@ -32,7 +32,7 @@ const DOM=[-2.6,2.6,-2,2];                          // surface domain: x min/max
 function loss(x,y){return .25*x*x+.7*y*y+.7*Math.cos(1.6*x)} // bowl with a ridge (crest) along x=0
 function grad(x,y){return [.5*x-1.12*Math.sin(1.6*x),1.4*y]}
 const PATH=[];{let x=-.35,y=1.9;for(let i=0;i<=K;i++){PATH.push([x,y,loss(x,y)]);const g=grad(x,y);x-=LR*g[0];y-=LR*g[1]}}
-const ARC=[0];for(let i=1;i<=K;i++)ARC.push(ARC[i-1]+Math.hypot(...PATH[i].map((v,k)=>v-PATH[i-1][k]))); // cumulative 3D arc length; time maps to distance, not step, so late tiny steps don't stall the ball
+const ARC=[0];for(let i=1;i<=K;i++)ARC.push(ARC[i-1]+Math.hypot(PATH[i][0]-PATH[i-1][0],PATH[i][1]-PATH[i-1][1])); // cumulative xy arc length (z excluded so on-screen speed stays even); time maps to distance, not step
 const CAPS=[[2.5,8.5],[8.5,14.5],[14.5,20.5],[20.5,23.4]]; // caption windows; fade() handles in/out
 function clamp01(v){return v<0?0:v>1?1:v}
 function ease(k){return k<.5?2*k*k:1-(-2*k+2)*(-2*k+2)/2}
