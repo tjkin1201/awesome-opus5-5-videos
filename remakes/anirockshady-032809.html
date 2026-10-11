@@ -32,12 +32,14 @@ const DOM=[-2.6,2.6,-2,2];                          // surface domain: x min/max
 function loss(x,y){return .25*x*x+.7*y*y+.7*Math.cos(1.6*x)} // bowl with a ridge (crest) along x=0
 function grad(x,y){return [.5*x-1.12*Math.sin(1.6*x),1.4*y]}
 const PATH=[];{let x=-.35,y=1.9;for(let i=0;i<=K;i++){PATH.push([x,y,loss(x,y)]);const g=grad(x,y);x-=LR*g[0];y-=LR*g[1]}}
+const ARC=[0];for(let i=1;i<=K;i++)ARC.push(ARC[i-1]+Math.hypot(...PATH[i].map((v,k)=>v-PATH[i-1][k]))); // cumulative 3D arc length; time maps to distance, not step, so late tiny steps don't stall the ball
 const CAPS=[[2.5,8.5],[8.5,14.5],[14.5,20.5],[20.5,23.4]]; // caption windows; fade() handles in/out
 function clamp01(v){return v<0?0:v>1?1:v}
 function ease(k){return k<.5?2*k*k:1-(-2*k+2)*(-2*k+2)/2}
 function fade(t,a,b,d=.6){return Math.min(clamp01((t-a)/d),clamp01((b-t)/d))}
 function stateAt(t){
- const u=clamp01((t-D0)/(D1-D0)),f=u*K,i=Math.min(K-1,Math.floor(f)),e=ease(f-i),a=PATH[i],b=PATH[i+1];
+ const u=clamp01((t-D0)/(D1-D0)),s=ARC[K]*(1-(1-u)*(1-u));let i=0;while(i<K-1&&ARC[i+1]<s)i++; // ease-out so the ball settles rather than stops dead
+ const a=PATH[i],b=PATH[i+1],e=ARC[i+1]>ARC[i]?clamp01((s-ARC[i])/(ARC[i+1]-ARC[i])):1;
  const x=a[0]+(b[0]-a[0])*e,y=a[1]+(b[1]-a[1])*e,g=grad(x,y),w=2*Math.PI*((t/LOOP)%1); // %1 so w is exactly 0 at both seam ends
  return {x,y,z:loss(x,y),gn:Math.hypot(g[0],g[1]),step:u>=1?K:i,trail:u>=1?K+1:i+1,
   yaw:-.55+.14*Math.sin(w),pitch:.78+.05*Math.cos(w),
