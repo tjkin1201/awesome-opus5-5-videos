@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gradient Descent Path</title>
+<!--
+  Remake of prompts/anirockshady-032809.md:
+  "Create a 3D animation of a Path Points in this case ball reaching approximation from crest to trough.
+   Discuss the type of ML algorithm gradient descent is. Also list major use cases. And transition can be
+   fade in fade out. Colour theory Volcanic Orange, Cyan and gradient of grey"
+  Reference (Skillry remake, Three.js · GLSL · SVG): took the loss-surface-with-rolling-ball staging and the
+  captions-beside-the-scene layout. Did not take its renderer, shaders or SVG overlay (everything here is
+  Canvas 2D with a software projection and a painter's sort). Do not copy.
+  Zero dependencies. One rAF loop, 24s cycle. The descent path is computed once at load, so stateAt(t) is a
+  pure function and draw() reads nothing but its result: ?t=<sec> freezes the clock for screenshots, and
+  remakes/sim_descent.js runs the SIM block in Node to prove the path and the loop seam:
+    node remakes/sim_descent.js remakes/anirockshady-032809.html
+-->
+<style>
+  html,body{margin:0;height:100%;background:#0b0d10;overflow:hidden}
+  canvas{position:absolute;inset:0;margin:auto;width:min(100vw,calc(100vh*16/9));aspect-ratio:16/9;display:block}
+</style>
+</head>
+<body>
+<canvas id="c" width="960" height="540"></canvas>
+<script>
+'use strict';
+//SIM-BEGIN
+const LOOP=24,LR=.05,K=80,D0=2.5,D1=19.5;           // seconds: the ball descends from D0 to D1
+const DOM=[-2.6,2.6,-2,2];                          // surface domain: x min/max, y min/max
+function loss(x,y){return .25*x*x+.7*y*y+.7*Math.cos(1.6*x)} // bowl with a ridge (crest) along x=0
+function grad(x,y){return [.5*x-1.12*Math.sin(1.6*x),1.4*y]}
+const PATH=[];{let x=-.35,y=1.9;for(let i=0;i<=K;i++){PATH.push([x,y,loss(x,y)]);const g=grad(x,y);x-=LR*g[0];y-=LR*g[1]}}
+const CAPS=[[2.5,8.5],[8.5,14.5],[14.5,20.5],[20.5,23.4]]; // caption windows; fade() handles in/out
+function clamp01(v){return v<0?0:v>1?1:v}
+function ease(k){return k<.5?2*k*k:1-(-2*k+2)*(-2*k+2)/2}
+function fade(t,a,b,d=.6){return Math.min(clamp01((t-a)/d),clamp01((b-t)/d))}
+function stateAt(t){
+ const u=clamp01((t-D0)/(D1-D0)),f=u*K,i=Math.min(K-1,Math.floor(f)),e=ease(f-i),a=PATH[i],b=PATH[i+1];
+ const x=a[0]+(b[0]-a[0])*e,y=a[1]+(b[1]-a[1])*e,g=grad(x,y),w=2*Math.PI*((t/LOOP)%1); // %1 so w is exactly 0 at both seam ends
+ return {x,y,z:loss(x,y),gn:Math.hypot(g[0],g[1]),step:u>=1?K:i,trail:u>=1?K+1:i+1,
+  yaw:-.55+.14*Math.sin(w),pitch:.78+.05*Math.cos(w),
+  title:fade(t,.6,23.4,.9),caps:CAPS.map(c=>fade(t,c[0],c[1])),conv:fade(t,19.8,23.4),
+  fadeG:Math.min(clamp01(t/.8),clamp01((LOOP-t)/.8))};
+}
+//SIM-END
+
+const W=960,H=540,ZS=.4,CX=W*.37,NX=30,NY=24,PX=612,PW=324;
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const q=new URLSearchParams(location.search);
+const FROZEN=q.has('t')||matchMedia('(prefers-reduced-motion: reduce)').matches;
+const T0=q.has('t')?+q.get('t'):9.5;
+const FONT='system-ui,-apple-system,Segoe UI,Helvetica,sans-serif',MONO='ui-monospace,Menlo,Consolas,monospace';
+const C={bg:'#0b0d10',ink:'#e9ecef',dim:'#8b949e',or:'#ff5a1f',cy:'#19d3e0'};
+const STOPS=[[25,211,224],[92,98,106],[255,90,31]]; // cyan trough -> grey -> volcanic orange crest
+let ZMIN=1e9,ZMAX=-1e9;
+for(let j=0;j<=NY;j++)for(let i=0;i<=NX;i++){const z=loss(DOM[0]+(DOM[1]-DOM[0])*i/NX,DOM[2]+(DOM[3]-DOM[2])*j/NY);ZMIN=Math.min(ZMIN,z);ZMAX=Math.max(ZMAX,z)}
+function heightColor(z,a){const h=(z-ZMIN)/(ZMAX-ZMIN),s=h<.45?[STOPS[0],STOPS[1],h/.45]:[STOPS[1],STOPS[2],(h-.45)/.55];
+ const c=s[0].map((v,i)=>Math.round(v+(s[1][i]-v)*s[2]));return `rgba(${c[0]},${c[1]},${c[2]},${a})`}
+function proj(x,y,z,st){ // world: x right, y away, z up. Yaw about up, pitch about right, then perspective.
+ const cy=Math.cos(st.yaw),sy=Math.sin(st.yaw),cp=Math.cos(st.pitch),sp=Math.sin(st.pitch);
+ const X=x*cy-y*sy,Yd=x*sy+y*cy,Z=z*ZS-.95,d=Yd*cp-Z*sp+7.5,k=H*1.05/d;
+ return [CX+X*k,H*.52-(Yd*sp+Z*cp)*k,d]}
+
+function drawSurface(st){
+ const P=[];for(let j=0;j<=NY;j++){const r=[];for(let i=0;i<=NX;i++){const x=DOM[0]+(DOM[1]-DOM[0])*i/NX,y=DOM[2]+(DOM[3]-DOM[2])*j/NY,z=loss(x,y);const p=proj(x,y,z,st);p.push(z);r.push(p)}P.push(r)}
+ const Q=[];for(let j=0;j<NY;j++)for(let i=0;i<NX;i++){const a=P[j][i],b=P[j][i+1],c=P[j+1][i+1],d=P[j+1][i];Q.push([(a[2]+b[2]+c[2]+d[2])/4,(a[3]+b[3]+c[3]+d[3])/4,a,b,c,d])}
+ Q.sort((p,q)=>q[0]-p[0]); // painter's sort: far quads first
+ ctx.lineWidth=.8;ctx.strokeStyle='rgba(233,236,239,.2)';
+ for(const q of Q){ctx.beginPath();ctx.moveTo(q[2][0],q[2][1]);ctx.lineTo(q[3][0],q[3][1]);ctx.lineTo(q[4][0],q[4][1]);ctx.lineTo(q[5][0],q[5][1]);ctx.closePath();ctx.fillStyle=heightColor(q[1],.92);ctx.fill();ctx.stroke()}
+}
+function drawPath(st){ // shortcut: trail and ball are painted over the sorted surface (no occlusion by a nearer ridge); the camera is chosen so the path never passes behind one
+ ctx.lineWidth=1.6;ctx.strokeStyle='rgba(25,211,224,.85)';ctx.beginPath();
+ for(let n=0;n<st.trail;n++){const p=proj(PATH[n][0],PATH[n][1],PATH[n][2]+.04,st);n?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])}
+ const b=proj(st.x,st.y,st.z+.04,st);ctx.lineTo(b[0],b[1]);ctx.stroke();
+ ctx.fillStyle=C.cy;for(let n=0;n<st.trail;n++){const p=proj(PATH[n][0],PATH[n][1],PATH[n][2]+.04,st);ctx.beginPath();ctx.arc(p[0],p[1],2.6*7.5/p[2],0,6.2832);ctx.fill()}
+ const r=12*7.5/b[2];
+ ctx.fillStyle='rgba(0,0,0,.35)';ctx.beginPath();ctx.ellipse(b[0],b[1]+2,r*1.05,r*.42,0,0,6.2832);ctx.fill();
+ if(st.conv>0){ctx.fillStyle=`rgba(255,90,31,${.35*st.conv})`;ctx.beginPath();ctx.arc(b[0],b[1]-r,r*2.2,0,6.2832);ctx.fill()}
+ const gr=ctx.createRadialGradient(b[0]-r*.35,b[1]-r*1.35,r*.1,b[0],b[1]-r,r);
+ gr.addColorStop(0,'#ffd2b8');gr.addColorStop(.35,C.or);gr.addColorStop(1,'#7a2408');
+ ctx.fillStyle=gr;ctx.beginPath();ctx.arc(b[0],b[1]-r,r,0,6.2832);ctx.fill();
+}
+function wrap(txt,x,y,maxW,lh){let line='';for(const w of txt.split(' ')){const t=line?line+' '+w:w;if(ctx.measureText(t).width>maxW&&line){ctx.fillText(line,x,y);y+=lh;line=w}else line=t}if(line){ctx.fillText(line,x,y);y+=lh}return y}
+function heading(txt,y){ctx.fillStyle=C.or;ctx.font=`600 19px ${FONT}`;ctx.fillText(txt,PX,y);ctx.fillStyle=C.ink;ctx.font=`15px ${FONT}`;return y+30}
+const CAPTION=[
+ a=>{let y=heading('What kind of algorithm?',a);
+  y=wrap('An iterative, first-order optimization algorithm. It is not a learning model itself: it is the optimizer that fits a model’s parameters by stepping against the gradient of a loss function.',PX,y,PW,22);
+  ctx.fillStyle=C.cy;ctx.font=`18px ${MONO}`;ctx.fillText('θ ← θ − η · ∇L(θ)',PX,y+14)},
+ a=>{let y=heading('First-order, in three flavours',a);
+  y=wrap('First-order means it uses only the slope ∇L, never the curvature, so each step is cheap. Batch GD looks at the whole dataset per step, stochastic GD (SGD) at one sample, mini-batch at a small chunk. Momentum and Adam reshape the step.',PX,y,PW,22)},
+ a=>{let y=heading('Major use cases',a);
+  for(const s of ['Linear & logistic regression','Training neural networks (backpropagation)','Support vector machines','Recommender systems (matrix factorization)','Any differentiable loss: embeddings, control, physics fits']){
+   ctx.fillStyle=C.cy;ctx.fillRect(PX,y-11,5,5);ctx.fillStyle=C.ink;y=wrap(s,PX+16,y,PW-16,22)+4}},
+ a=>{let y=heading('Converged',a);
+  wrap('At the trough the gradient is ≈ 0, so the steps vanish: a local minimum. The learning rate η sets the step size. Too large overshoots the valley, too small crawls.',PX,y,PW,22)}];
+function drawText(st){
+ ctx.textBaseline='alphabetic';ctx.textAlign='left';
+ ctx.globalAlpha=st.title;
+ ctx.fillStyle=C.ink;ctx.font=`700 30px ${FONT}`;ctx.fillText('GRADIENT DESCENT',PX,74);
+ ctx.fillStyle=C.dim;ctx.font=`15px ${FONT}`;ctx.fillText('a ball rolling from crest to trough',PX,98);
+ const lg=ctx.createLinearGradient(PX,0,PX+PW,0);lg.addColorStop(0,C.or);lg.addColorStop(1,C.cy);ctx.fillStyle=lg;ctx.fillRect(PX,112,PW,2);
+ ctx.fillStyle=C.dim;ctx.font=`13px ${MONO}`;
+ ctx.fillText(`step ${String(st.step).padStart(2,'0')} / ${K}   loss ${st.z.toFixed(3)}   |∇L| ${st.gn.toFixed(3)}`,36,H-34);
+ ctx.fillStyle=C.cy;ctx.fillRect(36,H-58,8,8);ctx.fillStyle=C.dim;ctx.font=`13px ${FONT}`;ctx.fillText('path points',52,H-50);
+ ctx.fillStyle=C.or;ctx.beginPath();ctx.arc(160,H-54,5,0,6.2832);ctx.fill();ctx.fillText('ball (current θ)',172,H-50);
+ for(let i=0;i<CAPTION.length;i++)if(st.caps[i]>0){ctx.globalAlpha=st.caps[i];CAPTION[i](170)}
+ ctx.globalAlpha=1;
+}
+function draw(st){
+ ctx.fillStyle=C.bg;ctx.fillRect(0,0,W,H);
+ drawSurface(st);drawPath(st);drawText(st);
+ if(st.fadeG<1){ctx.fillStyle=`rgba(11,13,16,${1-st.fadeG})`;ctx.fillRect(0,0,W,H)}
+}
+function frame(now){draw(stateAt(FROZEN?T0:(now/1000)%LOOP));if(!FROZEN)requestAnimationFrame(frame)}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
